@@ -1,0 +1,6 @@
+.idea/
+bin/
+cache/
+data/
+__pycache__/
+*.csv
