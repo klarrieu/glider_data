@@ -2,5 +2,6 @@
 bin/
 cache/
 data/
+figs/
 __pycache__/
 *.csv

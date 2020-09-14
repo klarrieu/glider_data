@@ -10,6 +10,13 @@ from pandas.plotting import register_matplotlib_converters
 register_matplotlib_converters()
 
 
+def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=100):
+    new_cmap = colors.LinearSegmentedColormap.from_list(
+        'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
+        cmap(np.linspace(minval, maxval, n)))
+    return new_cmap
+
+
 class GliderData:
     def __init__(self, filename, *args, **kwargs):
 
@@ -76,7 +83,6 @@ class GliderData:
 
         return df
 
-
     def get_label(self, par):
         """Get parameter label for plotting"""
         if par in self.label_dict.keys():
@@ -84,6 +90,32 @@ class GliderData:
         else:
             par_name = ' '.join(par.split('_')[1:])
         return par_name
+
+    def get_datetime_plot_label(self, dts):
+        utc_offset = int(min(dts).utcoffset().total_seconds() / 60 / 60)
+        utc_offset = '%i:00' % utc_offset if utc_offset < 0 else '+%i:00' % utc_offset
+        if min(dts).year == max(dts).year:
+            if min(dts).month == max(dts).month:
+                if min(dts).day == max(dts).day:
+                    # all data spans single day
+                    d_range = min(dts).strftime('%b %d %Y')
+                else:
+                    # multiple days but same month
+                    d_range = min(dts).strftime('%b %d-') + max(dts).strftime('%d %Y')
+            else:
+                #multiple months but same year
+                d_range = min(dts).strftime('%b %d-') + max(dts).strftime('%b %d %Y')
+        else:
+            # multiple years
+            d_range = min(dts).strftime('%b %d %Y-') + max(dts).strftime('%b %d %Y')
+
+        label = 'Local Time (UTC%s)\n%s' % (utc_offset, d_range)
+        return label
+
+    def get_info(self):
+        for col in self.df.columns:
+            parmin, parmax = min(self.df[col]), max(self.df[col])
+            print('%s: min: %.2f, max: %.2f' % (col, parmin, parmax))
 
     def set_date_range(self, min_t, max_t):
         """Set date range to subset all data from when using self.get() method"""
@@ -120,11 +152,12 @@ class GliderData:
 
         # get time, pressure, and par
         df = self.get([self.press_par, par], min_val=min_val, max_val=max_val)
+        df['press_dbar'] = df[self.press_par] * 10
 
         # set point size
         s = kwargs['s'] if 's' in kwargs.keys() else 1
-
-        # determine colormap range
+        # determine colormap and colormap range
+        cmap = kwargs['cmap'] if 'cmap' in kwargs.keys() else 'inferno'
         if 'c_range' in kwargs.keys():
             vmin, vmax = kwargs['c_range']
         else:
@@ -132,22 +165,22 @@ class GliderData:
 
         # plot
         fig, ax = plt.subplots()
+        datenum = mdates.date2num(df['date'])
         # x axis formatting
-        ax.set(xlabel='Local Time')
-        ax.set_xlim(min(df['date']), max(df['date']))
-        locator = mdates.AutoDateLocator(minticks=3, maxticks=10)
-        formatter = mdates.ConciseDateFormatter(locator)
-        ax.xaxis.set_major_formatter(formatter)
+        ax.set(xlabel=self.get_datetime_plot_label(df['date']))
+        ax.set_xlim(min(datenum), max(datenum))
+        fig.autofmt_xdate()  # rotates xtick labels
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=self.tz))
+        ax.xaxis.set_major_locator(mdates.HourLocator(byhour=[0, 6, 12, 18], tz=self.tz))
         # y axis formatting
-        ax.set(ylabel='pressure [bar]')
-        ax.set_ylim(0, max(df[self.press_par]))
+        ax.set(ylabel='pressure [dbar]')
+        ax.set_ylim(0, max(df['press_dbar']))
         ax.invert_yaxis()
         # add data to plot
         if contour:
-            norm = colors.Normalize(vmin, vmax)
-            sc = ax.tricontourf(df['date'], df[self.press_par], df[par], norm=norm)
+            sc = ax.tricontourf(datenum, df['press_dbar'], df[par], cmap=cmap, levels=20)
         else:
-            sc = ax.scatter(df['date'], df[self.press_par], s=s, c=df[par], cmap='inferno', vmin=vmin, vmax=vmax)
+            sc = ax.scatter(datenum, df['press_dbar'], s=s, c=df[par], cmap=cmap, vmin=vmin, vmax=vmax)
         # add color bar
         cb = fig.colorbar(sc)
         cb.set_label(self.get_label(par))
