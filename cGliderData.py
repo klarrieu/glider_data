@@ -4,8 +4,9 @@ import datetime as dt
 from pytz import timezone
 import time
 import matplotlib.pyplot as plt
-from matplotlib import colors
 import matplotlib.dates as mdates
+from matplotlib import colors
+from scipy.interpolate import griddata
 from pandas.plotting import register_matplotlib_converters
 register_matplotlib_converters()
 
@@ -103,7 +104,7 @@ class GliderData:
                     # multiple days but same month
                     d_range = min(dts).strftime('%b %d-') + max(dts).strftime('%d %Y')
             else:
-                #multiple months but same year
+                # multiple months but same year
                 d_range = min(dts).strftime('%b %d-') + max(dts).strftime('%b %d %Y')
         else:
             # multiple years
@@ -116,6 +117,19 @@ class GliderData:
         for col in self.df.columns:
             parmin, parmax = min(self.df[col]), max(self.df[col])
             print('%s: min: %.2f, max: %.2f' % (col, parmin, parmax))
+
+    def interpolate_contour_grid(self, x, y, z, res=(4000, 1000), method='nearest'):
+        # grid resolution for interpolation
+        x_range = [min(x), max(x)]
+        y_range = [min(y), max(y)]
+
+        xi = np.linspace(*x_range, res[0])
+        yi = np.linspace(*y_range, res[1])
+
+        grid_x, grid_y = np.meshgrid(xi, yi)
+        zi = griddata((np.array(x), np.array(y)), np.array(z), (grid_x, grid_y), method=method)
+
+        return xi, yi, zi
 
     def set_date_range(self, min_t, max_t):
         """Set date range to subset all data from when using self.get() method"""
@@ -136,6 +150,7 @@ class GliderData:
 
     def plot(self, par, min_val=-np.inf, max_val=np.inf):
         """Plot par as a function of time, subset to data range."""
+        print('plotting %s time series...' % par)
         df = self.get(par, min_val=min_val, max_val=max_val)
 
         # plot
@@ -143,9 +158,11 @@ class GliderData:
         ax.plot(df['date'], df[par])
         ax.set(ylabel=self.get_label(par))
         plt.show()
+        print('done.')
 
     def plot_xy(self, par, contour=False, **kwargs):
         """Plot par by color as function of time and pressure/depth"""
+        print('plotting %s profile...' % par)
         # set data range
         min_val = kwargs['min_val'] if 'min_val' in kwargs.keys() else [-np.inf] * 2
         max_val = kwargs['max_val'] if 'max_val' in kwargs.keys() else [np.inf] * 2
@@ -178,11 +195,14 @@ class GliderData:
         ax.invert_yaxis()
         # add data to plot
         if contour:
-            sc = ax.tricontourf(datenum, df['press_dbar'], df[par], cmap=cmap, levels=20)
+            res = kwargs['res'] if 'res' in kwargs.keys() else (4000, 1000)
+            method = kwargs['method'] if 'method' in kwargs.keys() else 'nearest'
+            sc = ax.contourf(*self.interpolate_contour_grid(datenum, df['press_dbar'], df[par], res=res, method=method),
+                             cmap=cmap, vmin=vmin, vmax=vmax, levels=20)
         else:
             sc = ax.scatter(datenum, df['press_dbar'], s=s, c=df[par], cmap=cmap, vmin=vmin, vmax=vmax)
         # add color bar
         cb = fig.colorbar(sc)
         cb.set_label(self.get_label(par))
         plt.show()
-
+        print('done.')
