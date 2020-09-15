@@ -175,10 +175,7 @@ class GliderData:
         s = kwargs['s'] if 's' in kwargs.keys() else 1
         # determine colormap and colormap range
         cmap = kwargs['cmap'] if 'cmap' in kwargs.keys() else 'inferno'
-        if 'c_range' in kwargs.keys():
-            vmin, vmax = kwargs['c_range']
-        else:
-            vmin, vmax = min(df[par]), max(df[par])
+        vmin, vmax = kwargs['c_range'] if 'c_range' in kwargs.keys() else [min(df[par]), max(df[par])]
 
         # plot
         fig, ax = plt.subplots()
@@ -197,8 +194,9 @@ class GliderData:
         if contour:
             res = kwargs['res'] if 'res' in kwargs.keys() else (4000, 1000)
             method = kwargs['method'] if 'method' in kwargs.keys() else 'nearest'
+            levels = kwargs['levels'] if 'levels' in kwargs.keys() else 20
             sc = ax.contourf(*self.interpolate_contour_grid(datenum, df['press_dbar'], df[par], res=res, method=method),
-                             cmap=cmap, vmin=vmin, vmax=vmax, levels=20)
+                             cmap=cmap, vmin=vmin, vmax=vmax, levels=levels)
         else:
             sc = ax.scatter(datenum, df['press_dbar'], s=s, c=df[par], cmap=cmap, vmin=vmin, vmax=vmax)
         # add color bar
