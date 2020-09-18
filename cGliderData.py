@@ -7,6 +7,7 @@ import time
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib import colors
+from mpl_toolkits import mplot3d
 from scipy.interpolate import griddata
 from pandas.plotting import register_matplotlib_converters
 
@@ -29,6 +30,10 @@ class GliderData:
         self.df = pd.read_csv(filename, index_col=False)
         print('done.')
 
+        # set m_present_time as index
+        self.time_par = 'm_present_time'
+        # self.df.index = self.df[self.time_par]
+
         # ctd parameter names
         self.ctd_time_par = 'sci_ctd41cp_timestamp'
         self.press_par = 'sci_water_pressure'
@@ -44,9 +49,11 @@ class GliderData:
         self.clean_gps_data()
 
         # derived variable names
+        self.depth_par = 'depth'
         self.density_par = 'density'
         self.Nsquared_par = 'Nsquared'
         # calculate derived variables
+        self.get_depth()
         self.get_density()
         self.get_Nsquared()
 
@@ -65,6 +72,16 @@ class GliderData:
         # convert lat/long from DDMM.MMM to decimal degrees
         self.df[self.lat_par] = self.df[self.raw_lat_par].apply(fdv.convert_latlong)
         self.df[self.long_par] = self.df[self.raw_long_par].apply(fdv.convert_latlong)
+
+        # interpolate values along time axis
+        self.df[self.lat_par] = self.df[self.lat_par].interpolate(method='index')
+        self.df[self.long_par] = self.df[self.long_par].interpolate(method='index')
+
+        # only keep values where pressure is also defined
+        self.df.loc[pd.isnull(self.df[self.press_par]), [self.lat_par, self.long_par]] = np.nan
+
+        # remove values before first/after last gps points
+        self.df.loc[pd.isnull(self.df[self.lat_par]), :] = np.nan
 
     def get(self, par, **kwargs):
         """
@@ -110,6 +127,11 @@ class GliderData:
         df['date'] = [dt.datetime.fromtimestamp(ti).astimezone(self.tz) for ti in df[self.ctd_time_par]]
 
         return df
+
+    def get_depth(self):
+        self.df[self.depth_par] = fdv.calculate_depth(self.df[self.press_par],
+                                                      self.df[self.lat_par])
+        return self.df[self.depth_par]
 
     def get_density(self):
         self.df[self.density_par] = fdv.calculate_density(self.df[self.temp_par],
@@ -259,6 +281,17 @@ class GliderData:
         """
         print('plotting %s 3D profile...' % par)
         print('Using tracks: %s' % track)
-        # set data range
-        min_val = kwargs['min_val'] if 'min_val' in kwargs.keys() else [-np.inf] * 2
-        max_val = kwargs['max_val'] if 'max_val' in kwargs.keys() else [np.inf] * 2
+        # set data range for lat, long, pressure and par
+        min_val = kwargs['min_val'] if 'min_val' in kwargs.keys() else [-np.inf] * 4
+        max_val = kwargs['max_val'] if 'max_val' in kwargs.keys() else [np.inf] * 4
+
+        df = self.get([self.lat_par, self.long_par, self.press_par, par], min_val=min_val, max_val=max_val)
+        df['press_dbar'] = df[self.press_par] * 10
+
+        # make 3D plot
+        fig = plt.figure()
+        ax = fig.gca(projection='3d')
+        ax.invert_zaxis()
+        ax.scatter(df[self.lat_par], df[self.long_par], df['press_dbar'], c=df[par])
+        plt.show()
+

@@ -11,6 +11,18 @@ def convert_latlong(val):
         mins = val - degs*100
         return degs + mins/60
 
+
+def calculate_depth(p, lat):
+    """Calculates depth from pressure and latitude.
+
+    :param p: pressure (bar)
+    :param lat: latitude (decimal degrees)
+    :return: depth (m)
+    """
+    p_dbar = p * 10
+    return abs(gsw.z_from_p(p_dbar, lat))
+
+
 def calculate_density(T, p, C, lat, long):
     """Calculates density from temp, pressure, conductivity, and lat/long.
     All parameters and output are float or array-like.
@@ -32,6 +44,7 @@ def calculate_density(T, p, C, lat, long):
         C_mScm = C * 10
     else:
         C_mScm = [Ci * 10 for Ci in C]
+
     # calculate SP from conductivity (mS/cm), in-situ temperature (deg C), and gauge pressure (dbar)
     SP = gsw.SP_from_C(C_mScm, T, p_dbar)
     # calculate SA from SP (unitless), gauge pressure (dbar), longitude and latitude (decimal degrees)
@@ -53,16 +66,16 @@ def calculate_n2(T, p, C, lat, long):
     :return: buoyancy (i.e. brunt-vaisala) frequency N^2 (s^-2)
     """
     # pressure in dbars = pressure * 10
-    if type(p) == float:
-        p_dbar = p * 10
-    else:
-        p_dbar = [pi * 10 for pi in p]
+    p_dbar = p * 10
 
     # conductivity in mS/cm = conductivity * 10
-    if type(C) == float:
-        C_mScm = C * 10
-    else:
-        C_mScm = [Ci * 10 for Ci in C]
+    C_mScm = C * 10
+
+    print(T.count())
+    print(p.count())
+    print(C.count())
+    print(lat.count())
+    print(long.count())
     # calculate SP from conductivity (mS/cm), in-situ temperature (deg C), and gauge pressure (dbar)
     SP = gsw.SP_from_C(C_mScm, T, p_dbar)
     # calculate SA from SP (unitless), gauge pressure (dbar), longitude and latitude (decimal degrees)
@@ -70,4 +83,5 @@ def calculate_n2(T, p, C, lat, long):
     # calculate CT from SA (g/kg), in-situ temperature (deg C), and gauge pressure (dbar)
     CT = gsw.CT_from_t(SA, T, p_dbar)
     # calculate N^2
-    return gsw.Nsquared(SA, CT, p_dbar, lat=None)
+    nsquared, p_mid = gsw.Nsquared(SA, CT, p_dbar, lat=lat)
+    return nsquared
