@@ -44,7 +44,11 @@ for dir, subdirs, files in os.walk(ascii_dir):
 print('concatenating all data...')
 df = pd.concat(dfs, sort=True)
 # print('writing to master csv...')
+for col in df.columns:
+    print(col)
 # df.to_csv('LakeSuperior.csv', index=False)
-print('writing science data to csv...')
-df_sci = df[[col for col in df.columns if col.startswith('sci_')]]
+# columns to save in addition to all sci_ vars
+save_vars = ['m_present_time', 'm_lat', 'm_lon', 'xs_lat', 'xs_lon', 'xs_vert_speed']
+print('writing selected parameters to csv...')
+df_sci = df[[col for col in df.columns if col.startswith('sci') or col in save_vars]]
 df_sci.to_csv('LakeSuperior_sci.csv', index=False)

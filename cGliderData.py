@@ -1,3 +1,4 @@
+import fDerivedVars as fdv
 import numpy as np
 import pandas as pd
 import datetime as dt
@@ -8,6 +9,7 @@ import matplotlib.dates as mdates
 from matplotlib import colors
 from scipy.interpolate import griddata
 from pandas.plotting import register_matplotlib_converters
+
 register_matplotlib_converters()
 
 
@@ -32,12 +34,37 @@ class GliderData:
         self.press_par = 'sci_water_pressure'
         self.cond_par = 'sci_water_cond'
         self.temp_par = 'sci_water_temp'
+        self.chlor_par = 'sci_flbbcd_chlor_units'
 
+        # gps parameter names
+        self.raw_lat_par = 'm_lat'
+        self.raw_long_par = 'm_lon'
+        self.lat_par = 'latitude'
+        self.long_par = 'longitude'
+        self.clean_gps_data()
+
+        # derived variable names
+        self.density_par = 'density'
+        self.Nsquared_par = 'Nsquared'
+        # calculate derived variables
+        self.get_density()
+        self.get_Nsquared()
+
+        # labels for plotting of parameters
         self.label_dict = {self.press_par: 'pressure [bar]',
-                           self.temp_par: 'T [$^\circ$C]'}
+                           self.temp_par: 'T [$^\circ$C]',
+                           self.cond_par: 'conductivity [S/m]',
+                           self.chlor_par: 'Chlorophyll-a fluorescence [$\mu$g/L]',
+                           self.density_par: 'density [kg/m$^3$]',
+                           self.Nsquared_par: 'N$^2$ [s$^{-2}$]'}
 
         self.tz = timezone('UTC')
         self.set_date_range(min_t='1990-01-01', max_t='2100-12-31')
+
+    def clean_gps_data(self):
+        # convert lat/long from DDMM.MMM to decimal degrees
+        self.df[self.lat_par] = self.df[self.raw_lat_par].apply(fdv.convert_latlong)
+        self.df[self.long_par] = self.df[self.raw_long_par].apply(fdv.convert_latlong)
 
     def get(self, par, **kwargs):
         """
@@ -83,6 +110,22 @@ class GliderData:
         df['date'] = [dt.datetime.fromtimestamp(ti).astimezone(self.tz) for ti in df[self.ctd_time_par]]
 
         return df
+
+    def get_density(self):
+        self.df[self.density_par] = fdv.calculate_density(self.df[self.temp_par],
+                                                          self.df[self.press_par],
+                                                          self.df[self.cond_par],
+                                                          self.df[self.lat_par],
+                                                          self.df[self.long_par])
+        return self.df[self.density_par]
+
+    def get_Nsquared(self):
+        self.df[self.Nsquared_par] = fdv.calculate_n2(self.df[self.temp_par],
+                                                      self.df[self.press_par],
+                                                      self.df[self.cond_par],
+                                                      self.df[self.lat_par],
+                                                      self.df[self.long_par])
+        return self.df[self.Nsquared_par]
 
     def get_label(self, par):
         """Get parameter label for plotting"""
@@ -167,7 +210,7 @@ class GliderData:
         min_val = kwargs['min_val'] if 'min_val' in kwargs.keys() else [-np.inf] * 2
         max_val = kwargs['max_val'] if 'max_val' in kwargs.keys() else [np.inf] * 2
 
-        # get time, pressure, and par
+        # get time, pressure, and par (min/max_vals for pressure and par, respectively)
         df = self.get([self.press_par, par], min_val=min_val, max_val=max_val)
         df['press_dbar'] = df[self.press_par] * 10
 
@@ -204,3 +247,18 @@ class GliderData:
         cb.set_label(self.get_label(par))
         plt.show()
         print('done.')
+
+    def plot_3d_track(self, par, track='all', contour=False, **kwargs):
+        """Makes 3D plot of tracks using lat, long time
+
+        :param par: parameter to plot
+        :param track: subset of all data tracks to plot.
+        :param contour: if True, plots contours in addition to data
+
+        :return: 3d plot
+        """
+        print('plotting %s 3D profile...' % par)
+        print('Using tracks: %s' % track)
+        # set data range
+        min_val = kwargs['min_val'] if 'min_val' in kwargs.keys() else [-np.inf] * 2
+        max_val = kwargs['max_val'] if 'max_val' in kwargs.keys() else [np.inf] * 2
