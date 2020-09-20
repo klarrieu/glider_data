@@ -60,13 +60,17 @@ class GliderData:
         # labels for plotting of parameters
         self.label_dict = {self.press_par: 'pressure [bar]',
                            self.temp_par: 'T [$^\circ$C]',
+                           self.temp_par + '_anomaly': 'T anomaly [$^\circ$C]',
                            self.cond_par: 'conductivity [S/m]',
-                           self.chlor_par: 'Chlorophyll-a fluorescence [$\mu$g/L]',
+                           self.chlor_par: 'Chl-a fluorescence [$\mu$g/L]',
                            self.density_par: 'density [kg/m$^3$]',
                            self.Nsquared_par: 'N$^2$ [s$^{-2}$]'}
 
         self.tz = timezone('UTC')
         self.set_date_range(min_t='1990-01-01', max_t='2100-12-31')
+
+        # figure object for plotting
+        self.fig, self.axes = None, None
 
     def bin_avg_p(self, par, binsize):
         """Bin average par based on pressure"""
@@ -234,7 +238,7 @@ class GliderData:
         plt.show()
         print('done.')
 
-    def plot_xy(self, par, contour=False, **kwargs):
+    def plot_xy(self, par, contour=False, plot_index=(1, 1, 1), **kwargs):
         """Plot par by color as function of time and pressure/depth"""
         print('plotting %s profile...' % par)
         # set data range
@@ -252,31 +256,40 @@ class GliderData:
         vmin, vmax = kwargs['c_range'] if 'c_range' in kwargs.keys() else [min(df[par]), max(df[par])]
 
         # plot
-        fig, ax = plt.subplots()
+        # if first plot, get corresponding axis
+        if plot_index[2] == 1:
+            self.fig, self.axes = plt.subplots(*plot_index[:2], sharex=True, sharey=True, squeeze=False)
+        col_num = plot_index[2] % plot_index[1]
+        row_num = int((plot_index[2] - col_num)/plot_index[1] - 1)
+        self.ax = self.axes[row_num, col_num]
         datenum = mdates.date2num(df['date'])
-        # x axis formatting
-        ax.set(xlabel=self.get_datetime_plot_label(df['date']))
-        ax.set_xlim(min(datenum), max(datenum))
-        fig.autofmt_xdate()  # rotates xtick labels
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=self.tz))
-        ax.xaxis.set_major_locator(mdates.HourLocator(byhour=[0, 6, 12, 18], tz=self.tz))
+        # x axis formatting (if last subplot)
+        if plot_index[0] * plot_index[1] == plot_index[2]:
+            self.ax.set(xlabel=self.get_datetime_plot_label(df['date']))
+            self.ax.set_xlim(min(datenum), max(datenum))
+            self.fig.autofmt_xdate()  # rotates xtick labels
+            self.ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=self.tz))
+            self.ax.xaxis.set_major_locator(mdates.HourLocator(byhour=[0, 6, 12, 18], tz=self.tz))
         # y axis formatting
-        ax.set(ylabel='pressure [dbar]')
-        ax.set_ylim(0, max(df['press_dbar']))
-        ax.invert_yaxis()
+        self.ax.set(ylabel='pressure [dbar]')
+        self.ax.set_ylim(0, max(df['press_dbar']))
+        self.ax.invert_yaxis()
         # add data to plot
         if contour:
             res = kwargs['res'] if 'res' in kwargs.keys() else (4000, 1000)
             method = kwargs['method'] if 'method' in kwargs.keys() else 'nearest'
             levels = kwargs['levels'] if 'levels' in kwargs.keys() else 20
-            sc = ax.contourf(*self.interpolate_contour_grid(datenum, df['press_dbar'], df[par], res=res, method=method),
+            sc = self.ax.contourf(*self.interpolate_contour_grid(datenum, df['press_dbar'], df[par], res=res, method=method),
                              cmap=cmap, vmin=vmin, vmax=vmax, levels=levels)
         else:
-            sc = ax.scatter(datenum, df['press_dbar'], s=s, c=df[par], cmap=cmap, vmin=vmin, vmax=vmax)
+            sc = self.ax.scatter(datenum, df['press_dbar'], s=s, c=df[par], cmap=cmap, vmin=vmin, vmax=vmax)
         # add color bar
-        cb = fig.colorbar(sc)
+        cb = self.fig.colorbar(sc, ax=self.ax)
         cb.set_label(self.get_label(par))
-        plt.show()
+        # show if last subplot, and reset figure
+        if plot_index[0] * plot_index[1] == plot_index[2]:
+            plt.show()
+            self.fig, self.axes = None, None
         print('done.')
 
     def plot_3d_track(self, par, track='all', contour=False, **kwargs):
