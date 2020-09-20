@@ -32,7 +32,7 @@ class GliderData:
 
         # set m_present_time as index
         self.time_par = 'm_present_time'
-        # self.df.index = self.df[self.time_par]
+        self.df.index = self.df[self.time_par]
 
         # ctd parameter names
         self.ctd_time_par = 'sci_ctd41cp_timestamp'
@@ -55,7 +55,7 @@ class GliderData:
         # calculate derived variables
         self.get_depth()
         self.get_density()
-        self.get_Nsquared()
+        # self.get_Nsquared()
 
         # labels for plotting of parameters
         self.label_dict = {self.press_par: 'pressure [bar]',
@@ -67,6 +67,15 @@ class GliderData:
 
         self.tz = timezone('UTC')
         self.set_date_range(min_t='1990-01-01', max_t='2100-12-31')
+
+    def bin_avg_p(self, par, binsize):
+        """Bin average par based on pressure"""
+        print('averaging %s with %.2f bar bins...' % (par, binsize))
+        self.df['bin'] = np.floor(self.df[self.press_par] / binsize) * binsize
+        par_mean = self.df[['bin', par]].groupby('bin').mean()
+        self.df[par + '_mean'] = [par_mean.loc[i][0] if not np.isnan(i) else np.nan for i in self.df['bin']]
+        self.df[par + '_anomaly'] = self.df[par] - self.df[par + '_mean']
+        return par_mean
 
     def clean_gps_data(self):
         # convert lat/long from DDMM.MMM to decimal degrees
