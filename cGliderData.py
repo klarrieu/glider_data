@@ -30,12 +30,12 @@ class GliderData:
         self.df = pd.read_csv(filename, index_col=False)
         print('done.')
 
-        # set m_present_time as index
+        # set m_present_time as index (converted from POSIX timestamp --> datenum)
         self.time_par = 'm_present_time'
         self.df.index = self.df[self.time_par]
 
         # ctd parameter names
-        self.ctd_time_par = 'sci_ctd41cp_timestamp'
+        self.ctd_time_par = 'sci_ctd41cp_timestamp'  # POSIX timestamp
         self.press_par = 'sci_water_pressure'
         self.cond_par = 'sci_water_cond'
         self.temp_par = 'sci_water_temp'
@@ -66,8 +66,24 @@ class GliderData:
                            self.density_par: 'density [kg/m$^3$]',
                            self.Nsquared_par: 'N$^2$ [s$^{-2}$]'}
 
-        self.tz = timezone('UTC')
+        # datetime and datenum columns
+        self.dt_par = 'date'
+        self.ctd_dt_par = 'ctd_date'
+        self.datenum_par = 'datenum'
+        self.ctd_datenum_par = 'ctd_datenum'
+
+        # sets timezone attribute and creates datetime/datenum cols
+        self.set_timezone('UTC')
         self.set_date_range(min_t='1990-01-01', max_t='2100-12-31')
+
+        # set datenum as index (m_present_time converted from POSIX --> datenum)
+        self.df.index = self.df[self.datenum_par]
+
+        # drop rows without CTD data if selected
+        if 'drop_na_ctd' in kwargs.keys():
+            if kwargs['drop_na_ctd']:
+                print('Dropping rows with NA values for CTD...')
+                self.df = self.df.dropna(subset=[self.ctd_time_par, self.press_par, self.temp_par, self.cond_par])
 
         # figure object for plotting
         self.fig, self.axes = None, None
@@ -96,9 +112,13 @@ class GliderData:
         # remove values before first/after last gps points
         self.df.loc[pd.isnull(self.df[self.lat_par]), :] = np.nan
 
+    def get_turbulence_data(self, filename):
+        self.turb_df = pd.read_csv(filename)
+
+
     def get(self, par, **kwargs):
         """
-        Get dataframe for time and par, subset over data range.
+        Get dataframe for CTD time and par, subset over data range.
         :param par: str or list. If list of par names, gets all pars in addition to timestamp and datetime.
         :param min_val: float or list, minimum value of par(s).
         :param max_val: float or list, maximum value of par(s).
@@ -129,15 +149,12 @@ class GliderData:
 
         # get time and par and subset to data range
         if type(par) == list:
-            df = self.df[[self.ctd_time_par, *par]]
+            df = self.df[[self.ctd_datenum_par, self.ctd_dt_par, self.ctd_time_par, *par]]
             for i, p in enumerate(par):
                 df = df[df[p].between(min_val[i], max_val[i]) & df[self.ctd_time_par].between(self.min_ts, self.max_ts)]
         else:
-            df = self.df[[self.ctd_time_par, par]]
+            df = self.df[[self.ctd_datenum_par, self.ctd_dt_par, self.ctd_time_par, par]]
             df = df[df[par].between(min_val, max_val) & df[self.ctd_time_par].between(self.min_ts, self.max_ts)]
-
-        # convert timestamp to datetime object
-        df['date'] = [dt.datetime.fromtimestamp(ti).astimezone(self.tz) for ti in df[self.ctd_time_par]]
 
         return df
 
@@ -219,12 +236,38 @@ class GliderData:
     def set_timezone(self, tz):
         self.tz = timezone(tz)
 
+        # convert timestamps to datetime objects
+        self.df[self.dt_par] = [self.ts_to_dt(ti) for ti in self.df[self.time_par]]
+        self.df[self.ctd_dt_par] = [self.ts_to_dt(ti) for ti in self.df[self.ctd_time_par]]
+
+        # convert datetime objects to datenum format
+        self.df[self.datenum_par] = [self.dt_to_dn(ti) for ti in self.df[self.dt_par]]
+        self.df[self.ctd_datenum_par] = [self.dt_to_dn(ti) for ti in self.df[self.ctd_dt_par]]
+
     def str_to_ts(self, s):
         # convert date string to timestamp
         try:
             return time.mktime(dt.datetime.strptime(s, "%Y-%m-%d %H:%M").astimezone(self.tz).timetuple())
         except:
             return time.mktime(dt.datetime.strptime(s, "%Y-%m-%d").astimezone(self.tz).timetuple())
+
+    def ts_to_dt(self, ti):
+        # convert timestamp to datetime object
+        try:
+            val = dt.datetime.fromtimestamp(ti).astimezone(self.tz)
+            return val
+        except:
+            if (not np.isnan(ti)) and ti != 0:
+                print('WARNING: Encountered invalid timestamp value: {0}'.format(ti))
+            return np.nan
+
+    def dt_to_dn(self, ti):
+        # convert datetime object to datenum
+        try:
+            val = mdates.date2num(ti)
+            return val
+        except:
+            return np.nan
 
     def plot(self, par, min_val=-np.inf, max_val=np.inf):
         """Plot par as a function of time, subset to data range."""
@@ -233,7 +276,7 @@ class GliderData:
 
         # plot
         fig, ax = plt.subplots()
-        ax.plot(df['date'], df[par])
+        ax.plot(df[self.ctd_dt_par], df[par])
         ax.set(ylabel=self.get_label(par))
         plt.show()
         print('done.')
@@ -262,10 +305,10 @@ class GliderData:
         col_num = plot_index[2] % plot_index[1]
         row_num = int((plot_index[2] - col_num)/plot_index[1] - 1)
         self.ax = self.axes[row_num, col_num]
-        datenum = mdates.date2num(df['date'])
+        datenum = df[self.ctd_datenum_par]
         # x axis formatting (if last subplot)
         if plot_index[0] * plot_index[1] == plot_index[2]:
-            self.ax.set(xlabel=self.get_datetime_plot_label(df['date']))
+            self.ax.set(xlabel=self.get_datetime_plot_label(df[self.ctd_dt_par]))
             self.ax.set_xlim(min(datenum), max(datenum))
             self.fig.autofmt_xdate()  # rotates xtick labels
             self.ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=self.tz))
