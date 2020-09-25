@@ -30,9 +30,8 @@ class GliderData:
         self.df = pd.read_csv(filename, index_col=False)
         print('done.')
 
-        # set m_present_time as index (converted from POSIX timestamp --> datenum)
-        self.time_par = 'm_present_time'
-        self.df.index = self.df[self.time_par]
+        # glider time
+        self.time_par = 'm_present_time'  # POSIX timestamp
 
         # ctd parameter names
         self.ctd_time_par = 'sci_ctd41cp_timestamp'  # POSIX timestamp
@@ -52,10 +51,20 @@ class GliderData:
         self.depth_par = 'depth'
         self.density_par = 'density'
         self.Nsquared_par = 'Nsquared'
+        self.epsilon_par = 'epsilon1'
         # calculate derived variables
         self.get_depth()
         self.get_density()
         # self.get_Nsquared()
+
+        # flight variables
+        self.pitch_par = 'm_pitch'
+        self.clean_flight_vars()
+
+        # get yo numbers for individual tracks
+        self.inflection_num_par = 'm_tot_num_inflections'
+        self.yo_num_par = 'yo_num'
+        self.get_yo_nums()
 
         # labels for plotting of parameters
         self.label_dict = {self.press_par: 'pressure [bar]',
@@ -63,8 +72,10 @@ class GliderData:
                            self.temp_par + '_anomaly': 'T anomaly [$^\circ$C]',
                            self.cond_par: 'conductivity [S/m]',
                            self.chlor_par: 'Chl-a fluorescence [$\mu$g/L]',
+                           self.depth_par: 'depth [m]',
                            self.density_par: 'density [kg/m$^3$]',
-                           self.Nsquared_par: 'N$^2$ [s$^{-2}$]'}
+                           self.Nsquared_par: 'N$^2$ [s$^{-2}$]',
+                           self.epsilon_par: r'$\varepsilon$ [W/kg]'}
 
         # datetime and datenum columns
         self.dt_par = 'date'
@@ -79,11 +90,16 @@ class GliderData:
         # set datenum as index (m_present_time converted from POSIX --> datenum)
         self.df.index = self.df[self.datenum_par]
 
+        # drop rows without glider time par
+        self.df = self.df.dropna(subset=[self.time_par])
         # drop rows without CTD data if selected
         if 'drop_na_ctd' in kwargs.keys():
             if kwargs['drop_na_ctd']:
                 print('Dropping rows with NA values for CTD...')
                 self.df = self.df.dropna(subset=[self.ctd_time_par, self.press_par, self.temp_par, self.cond_par])
+
+        # values to always grab using self.get() method
+        self.always_grab = [self.ctd_datenum_par, self.ctd_dt_par, self.ctd_time_par, self.yo_num_par, self.pitch_par, self.depth_par]
 
         # figure object for plotting
         self.fig, self.axes = None, None
@@ -97,24 +113,75 @@ class GliderData:
         self.df[par + '_anomaly'] = self.df[par] - self.df[par + '_mean']
         return par_mean
 
+    def vert_demean(self, par):
+        pass  # ***TODO
+
     def clean_gps_data(self):
         # convert lat/long from DDMM.MMM to decimal degrees
         self.df[self.lat_par] = self.df[self.raw_lat_par].apply(fdv.convert_latlong)
         self.df[self.long_par] = self.df[self.raw_long_par].apply(fdv.convert_latlong)
 
         # interpolate values along time axis
+        print('interpolating latitude/longitude...')
         self.df[self.lat_par] = self.df[self.lat_par].interpolate(method='index')
         self.df[self.long_par] = self.df[self.long_par].interpolate(method='index')
 
-        # only keep values where pressure is also defined
+        """
+        # only keep lat/long values where pressure is also defined
         self.df.loc[pd.isnull(self.df[self.press_par]), [self.lat_par, self.long_par]] = np.nan
-
         # remove values before first/after last gps points
         self.df.loc[pd.isnull(self.df[self.lat_par]), :] = np.nan
+        """
+
+    def clean_flight_vars(self):
+        # linearly interpolate pitch based on time
+        print('interpolating measured glider pitch...')
+        self.df[self.pitch_par] = self.df[self.pitch_par].interpolate(method='index')
 
     def get_turbulence_data(self, filename):
+        # read in microrider data (*** make function to process turbulence data once I get details)
+        print('reading turbulence data...')
         self.turb_df = pd.read_csv(filename)
+        self.turb_df.columns = [self.datenum_par, 'p_dbar', 'T', 'Tprime', 'epsilon1', 'epsilon2']
+        self.turb_df.index = self.turb_df[self.datenum_par]
+        # concatenate with rest of data
+        print('concatenating...')
+        self.df = pd.concat([self.df, self.turb_df], sort=True)
+        self.df = self.df.sort_index()
 
+        # interpolate to rest of ctd_timestamp data
+        print('interpolating...')
+        for col in self.turb_df.columns:
+            self.df[col] = self.df[col].interpolate(method='nearest')
+
+    def get_yo_nums(self):
+        """Creates parameter for current yo number for counting/plotting individual tracks"""
+        print('getting yo numbers...')
+        yo_nums = []
+        current_yo = 0
+        for i in self.df[self.inflection_num_par]:
+            if not np.isnan(i):
+                current_yo = i
+            yo_nums.append(current_yo)
+        self.df[self.yo_num_par] = yo_nums
+        return self.df[self.yo_num_par]
+
+    def get_dist_traveled(self, yo_df):
+        """Gets horizontal distance traveled using pitch and depth for an individual yo"""
+        x = []
+        for pitch1, pitch2, depth1, depth2 in zip(yo_df[self.pitch_par],
+                                                  yo_df[self.pitch_par].shift(1, fill_value=yo_df[self.pitch_par].iloc[0]),
+                                                  yo_df[self.depth_par],
+                                                  yo_df[self.depth_par].shift(1, fill_value=yo_df[self.depth_par].iloc[0])):
+            dz = depth2 - depth1
+            avg_pitch = (pitch1 + pitch2)/2
+            dx = dz / np.tan(avg_pitch)
+            if x:
+                x.append(x[-1] + dx)
+            else:
+                x.append(dx)
+
+        return x
 
     def get(self, par, **kwargs):
         """
@@ -147,23 +214,25 @@ class GliderData:
             if par not in self.df.columns:
                 raise Exception('ERROR: parameter %s not valid.' % par)
 
-        # get time and par and subset to data range
+        # get self.always_grab pars and input par, subset to data range for time and input par
         if type(par) == list:
-            df = self.df[[self.ctd_datenum_par, self.ctd_dt_par, self.ctd_time_par, *par]]
+            df = self.df[{*self.always_grab, *par}]
             for i, p in enumerate(par):
                 df = df[df[p].between(min_val[i], max_val[i]) & df[self.ctd_time_par].between(self.min_ts, self.max_ts)]
         else:
-            df = self.df[[self.ctd_datenum_par, self.ctd_dt_par, self.ctd_time_par, par]]
+            df = self.df[{*self.always_grab, par}]
             df = df[df[par].between(min_val, max_val) & df[self.ctd_time_par].between(self.min_ts, self.max_ts)]
 
         return df
 
     def get_depth(self):
+        print('calculating depth...')
         self.df[self.depth_par] = fdv.calculate_depth(self.df[self.press_par],
                                                       self.df[self.lat_par])
         return self.df[self.depth_par]
 
     def get_density(self):
+        print('calculating density...')
         self.df[self.density_par] = fdv.calculate_density(self.df[self.temp_par],
                                                           self.df[self.press_par],
                                                           self.df[self.cond_par],
@@ -172,6 +241,7 @@ class GliderData:
         return self.df[self.density_par]
 
     def get_Nsquared(self):
+        print('calculating N^2...')
         self.df[self.Nsquared_par] = fdv.calculate_n2(self.df[self.temp_par],
                                                       self.df[self.press_par],
                                                       self.df[self.cond_par],
@@ -187,7 +257,12 @@ class GliderData:
             par_name = ' '.join(par.split('_')[1:])
         return par_name
 
-    def get_datetime_plot_label(self, dts):
+    def get_datetime_plot_label(self, dts, times=False):
+
+        if times:  # used for plotting individual yos (just show start day and start/end times)
+            d_range = min(dts).strftime('%b %d %Y, %H:%M-') + max(dts).strftime('%H:%M')
+            return d_range
+
         utc_offset = int(min(dts).utcoffset().total_seconds() / 60 / 60)
         utc_offset = '%i:00' % utc_offset if utc_offset < 0 else '+%i:00' % utc_offset
         if min(dts).year == max(dts).year:
@@ -241,8 +316,8 @@ class GliderData:
         self.df[self.ctd_dt_par] = [self.ts_to_dt(ti) for ti in self.df[self.ctd_time_par]]
 
         # convert datetime objects to datenum format
-        self.df[self.datenum_par] = [self.dt_to_dn(ti) for ti in self.df[self.dt_par]]
-        self.df[self.ctd_datenum_par] = [self.dt_to_dn(ti) for ti in self.df[self.ctd_dt_par]]
+        self.df[self.datenum_par] = [self.ts_to_dn(ti) for ti in self.df[self.time_par]]
+        self.df[self.ctd_datenum_par] = [self.ts_to_dn(ti) for ti in self.df[self.ctd_time_par]]
 
     def str_to_ts(self, s):
         # convert date string to timestamp
@@ -261,27 +336,59 @@ class GliderData:
                 print('WARNING: Encountered invalid timestamp value: {0}'.format(ti))
             return np.nan
 
-    def dt_to_dn(self, ti):
-        # convert datetime object to datenum
-        try:
-            val = mdates.date2num(ti)
-            return val
-        except:
+    def ts_to_dn(self, ti):
+        # convert datetime object to matlab datenum
+        if np.isnan(ti) or ti == 0:
             return np.nan
+        else:
+            ti = dt.datetime.fromtimestamp(ti)
+            mdn = ti + dt.timedelta(days=366)
+            frac = (ti - dt.datetime(ti.year, ti.month, ti.day, 0, 0, 0)).seconds / (24.0 * 60.0 * 60.0)
+            val = mdn.toordinal() + frac
+            return val
 
-    def plot(self, par, min_val=-np.inf, max_val=np.inf):
+    def plot(self, par, sep_yos=False, plot_index=(1, 1, 1), **kwargs):
         """Plot par as a function of time, subset to data range."""
         print('plotting %s time series...' % par)
-        df = self.get(par, min_val=min_val, max_val=max_val)
 
-        # plot
-        fig, ax = plt.subplots()
-        ax.plot(df[self.ctd_dt_par], df[par])
-        ax.set(ylabel=self.get_label(par))
-        plt.show()
+        par_list = par if type(par) == list else [par]
+
+        # set data range
+        min_val = kwargs['min_val'] if 'min_val' in kwargs.keys() else [-np.inf] * len(par_list)
+        max_val = kwargs['max_val'] if 'max_val' in kwargs.keys() else [np.inf] * len(par_list)
+
+        df = self.get(par_list, min_val=min_val, max_val=max_val)
+
+        if sep_yos:
+            # separate plot for each yo
+            for yo_num in set(df[self.yo_num_par]):
+                print('plotting yo num. %s...' % yo_num)
+                yo_df = df[df[self.yo_num_par] == yo_num]
+                x_dist = self.get_dist_traveled(yo_df)
+                # create Nx1 subplots
+                fig, axes = plt.subplots(len(par_list), 1, sharex=True, squeeze=False)
+                for i, p in enumerate(par_list):
+                    ax = axes[i][0]
+                    if p in [self.press_par, self.depth_par]:
+                        ax.invert_yaxis()
+                    ax.plot(x_dist, yo_df[p])
+                    ax.set(ylabel=self.get_label(p))
+                ax.set(xlabel='Horizontal distance [m]')
+                fig.suptitle(self.get_datetime_plot_label(yo_df[self.ctd_dt_par], times=True))
+                fig.savefig(f'.\\figs\\yos\\{int(yo_num)}.png')
+                plt.close(fig)
+
+        else:
+            # create Nx1 subplots
+            fig, axes = plt.subplots(len(par_list), 1, sharex=True, squeeze=False)
+            for i, p in enumerate(par_list):
+                ax = axes[i][0]
+                ax.plot(df[self.ctd_dt_par], df[p])
+                ax.set(ylabel=self.get_label(p))
+            plt.show()
         print('done.')
 
-    def plot_xy(self, par, contour=False, plot_index=(1, 1, 1), **kwargs):
+    def plot_xy(self, par, contour=False, log_scale=False, plot_index=(1, 1, 1), **kwargs):
         """Plot par by color as function of time and pressure/depth"""
         print('plotting %s profile...' % par)
         # set data range
@@ -297,6 +404,8 @@ class GliderData:
         # determine colormap and colormap range
         cmap = kwargs['cmap'] if 'cmap' in kwargs.keys() else 'inferno'
         vmin, vmax = kwargs['c_range'] if 'c_range' in kwargs.keys() else [min(df[par]), max(df[par])]
+        # colormap scaling
+        norm = colors.LogNorm(vmin=vmin, vmax=vmax) if log_scale else colors.Normalize(vmin=vmin, vmax=vmax)
 
         # plot
         # if first plot, get corresponding axis
@@ -323,9 +432,9 @@ class GliderData:
             method = kwargs['method'] if 'method' in kwargs.keys() else 'nearest'
             levels = kwargs['levels'] if 'levels' in kwargs.keys() else 20
             sc = self.ax.contourf(*self.interpolate_contour_grid(datenum, df['press_dbar'], df[par], res=res, method=method),
-                             cmap=cmap, vmin=vmin, vmax=vmax, levels=levels)
+                             cmap=cmap, norm=norm, levels=levels)
         else:
-            sc = self.ax.scatter(datenum, df['press_dbar'], s=s, c=df[par], cmap=cmap, vmin=vmin, vmax=vmax)
+            sc = self.ax.scatter(datenum, df['press_dbar'], s=s, c=df[par], cmap=cmap, norm=norm)
         # add color bar
         cb = self.fig.colorbar(sc, ax=self.ax)
         cb.set_label(self.get_label(par))

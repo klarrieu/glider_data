@@ -48,7 +48,16 @@ for col in df.columns:
     print(col)
 # df.to_csv('LakeSuperior.csv', index=False)
 # columns to save in addition to all sci_ vars
-save_vars = ['m_present_time', 'm_lat', 'm_lon', 'xs_lat', 'xs_lon', 'xs_vert_speed']
+save_vars = ['m_present_time',
+             'm_lat',
+             'm_lon',
+             'm_lat_gps',
+             'm_lon_gps',
+             'xs_lat',
+             'xs_lon',
+             'xs_vert_speed',
+             'm_tot_num_inflections',
+             'm_pitch']
 print('writing selected parameters to csv...')
 df_sci = df[[col for col in df.columns if col.startswith('sci') or col in save_vars]]
 df_sci.to_csv('LakeSuperior_sci.csv', index=False)
