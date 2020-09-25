@@ -12,6 +12,34 @@ def convert_latlong(val):
         return degs + mins/60
 
 
+def calculate_yo_num(inflections):
+    """Assigns yo number based on total number of inflections"""
+    yo_nums = []
+    current_yo = 0
+    for i in inflections:
+        if not np.isnan(i):
+            current_yo = i
+        yo_nums.append(current_yo)
+    return yo_nums
+
+
+def calculate_dist_traveled(pitches, depths):
+    """Calculates horizontal distance traveled (starting from 0), given pitch and depth values as Series objects."""
+    x = []
+    for pitch1, pitch2, depth1, depth2 in zip(pitches,
+                                              pitches.shift(1, fill_value=pitches.iloc[0]),
+                                              depths,
+                                              depths.shift(1, fill_value=depths.iloc[0])):
+        dz = depth2 - depth1
+        avg_pitch = (pitch1 + pitch2) / 2
+        dx = dz / np.tan(avg_pitch)
+        if x:
+            x.append(x[-1] + dx)
+        else:
+            x.append(dx)
+    return x
+
+
 def calculate_depth(p, lat):
     """Calculates depth from pressure and latitude.
 

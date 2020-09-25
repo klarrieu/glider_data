@@ -50,12 +50,12 @@ class GliderData:
         # derived variable names
         self.depth_par = 'depth'
         self.density_par = 'density'
-        self.Nsquared_par = 'Nsquared'
+        self.nsquared_par = 'Nsquared'
         self.epsilon_par = 'epsilon1'
         # calculate derived variables
         self.get_depth()
         self.get_density()
-        # self.get_Nsquared()
+        # self.get_nsquared()
 
         # flight variables
         self.pitch_par = 'm_pitch'
@@ -74,7 +74,7 @@ class GliderData:
                            self.chlor_par: 'Chl-a fluorescence [$\mu$g/L]',
                            self.depth_par: 'depth [m]',
                            self.density_par: 'density [kg/m$^3$]',
-                           self.Nsquared_par: 'N$^2$ [s$^{-2}$]',
+                           self.nsquared_par: 'N$^2$ [s$^{-2}$]',
                            self.epsilon_par: r'$\varepsilon$ [W/kg]'}
 
         # datetime and datenum columns
@@ -92,11 +92,6 @@ class GliderData:
 
         # drop rows without glider time par
         self.df = self.df.dropna(subset=[self.time_par])
-        # drop rows without CTD data if selected
-        if 'drop_na_ctd' in kwargs.keys():
-            if kwargs['drop_na_ctd']:
-                print('Dropping rows with NA values for CTD...')
-                self.df = self.df.dropna(subset=[self.ctd_time_par, self.press_par, self.temp_par, self.cond_par])
 
         # values to always grab using self.get() method
         self.always_grab = [self.ctd_datenum_par, self.ctd_dt_par, self.ctd_time_par, self.yo_num_par, self.pitch_par, self.depth_par]
@@ -126,13 +121,6 @@ class GliderData:
         self.df[self.lat_par] = self.df[self.lat_par].interpolate(method='index')
         self.df[self.long_par] = self.df[self.long_par].interpolate(method='index')
 
-        """
-        # only keep lat/long values where pressure is also defined
-        self.df.loc[pd.isnull(self.df[self.press_par]), [self.lat_par, self.long_par]] = np.nan
-        # remove values before first/after last gps points
-        self.df.loc[pd.isnull(self.df[self.lat_par]), :] = np.nan
-        """
-
     def clean_flight_vars(self):
         # linearly interpolate pitch based on time
         print('interpolating measured glider pitch...')
@@ -153,35 +141,6 @@ class GliderData:
         print('interpolating...')
         for col in self.turb_df.columns:
             self.df[col] = self.df[col].interpolate(method='nearest')
-
-    def get_yo_nums(self):
-        """Creates parameter for current yo number for counting/plotting individual tracks"""
-        print('getting yo numbers...')
-        yo_nums = []
-        current_yo = 0
-        for i in self.df[self.inflection_num_par]:
-            if not np.isnan(i):
-                current_yo = i
-            yo_nums.append(current_yo)
-        self.df[self.yo_num_par] = yo_nums
-        return self.df[self.yo_num_par]
-
-    def get_dist_traveled(self, yo_df):
-        """Gets horizontal distance traveled using pitch and depth for an individual yo"""
-        x = []
-        for pitch1, pitch2, depth1, depth2 in zip(yo_df[self.pitch_par],
-                                                  yo_df[self.pitch_par].shift(1, fill_value=yo_df[self.pitch_par].iloc[0]),
-                                                  yo_df[self.depth_par],
-                                                  yo_df[self.depth_par].shift(1, fill_value=yo_df[self.depth_par].iloc[0])):
-            dz = depth2 - depth1
-            avg_pitch = (pitch1 + pitch2)/2
-            dx = dz / np.tan(avg_pitch)
-            if x:
-                x.append(x[-1] + dx)
-            else:
-                x.append(dx)
-
-        return x
 
     def get(self, par, **kwargs):
         """
@@ -240,14 +199,25 @@ class GliderData:
                                                           self.df[self.long_par])
         return self.df[self.density_par]
 
-    def get_Nsquared(self):
+    def get_nsquared(self):
         print('calculating N^2...')
-        self.df[self.Nsquared_par] = fdv.calculate_n2(self.df[self.temp_par],
+        self.df[self.nsquared_par] = fdv.calculate_n2(self.df[self.temp_par],
                                                       self.df[self.press_par],
                                                       self.df[self.cond_par],
                                                       self.df[self.lat_par],
                                                       self.df[self.long_par])
-        return self.df[self.Nsquared_par]
+        return self.df[self.nsquared_par]
+
+    def get_yo_nums(self):
+        """Creates parameter for current yo number for counting/plotting individual tracks"""
+        print('getting yo numbers...')
+        self.df[self.yo_num_par] = fdv.calculate_yo_num(self.df[self.inflection_num_par])
+        return self.df[self.yo_num_par]
+
+    def get_dist_traveled(self, yo_df):
+        """Gets horizontal distance traveled using pitch and depth for an individual yo"""
+        x_dist = fdv.calculate_dist_traveled(yo_df[self.pitch_par], yo_df[self.depth_par])
+        return x_dist
 
     def get_label(self, par):
         """Get parameter label for plotting"""
@@ -337,7 +307,7 @@ class GliderData:
             return np.nan
 
     def ts_to_dn(self, ti):
-        # convert datetime object to matlab datenum
+        # convert timestamp to matlab datenum
         if np.isnan(ti) or ti == 0:
             return np.nan
         else:
