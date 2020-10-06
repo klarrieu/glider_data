@@ -5,3 +5,6 @@ data/
 figs/
 __pycache__/
 *.csv
+*.html
+slocum_masterdata*
+

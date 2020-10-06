@@ -285,7 +285,7 @@ class GliderData:
         self.df[self.dt_par] = [self.ts_to_dt(ti) for ti in self.df[self.time_par]]
         self.df[self.ctd_dt_par] = [self.ts_to_dt(ti) for ti in self.df[self.ctd_time_par]]
 
-        # convert datetime objects to datenum format
+        # convert timestamps to datenum format
         self.df[self.datenum_par] = [self.ts_to_dn(ti) for ti in self.df[self.time_par]]
         self.df[self.ctd_datenum_par] = [self.ts_to_dn(ti) for ti in self.df[self.ctd_time_par]]
 
@@ -308,14 +308,11 @@ class GliderData:
 
     def ts_to_dn(self, ti):
         # convert timestamp to matlab datenum
-        if np.isnan(ti) or ti == 0:
-            return np.nan
-        else:
-            ti = dt.datetime.fromtimestamp(ti)
-            mdn = ti + dt.timedelta(days=366)
-            frac = (ti - dt.datetime(ti.year, ti.month, ti.day, 0, 0, 0)).seconds / (24.0 * 60.0 * 60.0)
-            val = mdn.toordinal() + frac
+        try:
+            val = mdates.date2num(dt.datetime.fromtimestamp(ti).astimezone(self.tz))
             return val
+        except:
+            return np.nan
 
     def plot(self, par, sep_yos=False, plot_index=(1, 1, 1), **kwargs):
         """Plot par as a function of time, subset to data range."""
@@ -334,11 +331,17 @@ class GliderData:
             for yo_num in set(df[self.yo_num_par]):
                 print('plotting yo num. %s...' % yo_num)
                 yo_df = df[df[self.yo_num_par] == yo_num]
+                # QC measure: filter out sections staying at surface, where pitch is small
+                print('filtering out track sections with pitch deviation >0.1 from median...')
+                med_pitch = yo_df[self.pitch_par].median()
+                yo_df = yo_df[abs(yo_df[self.pitch_par] - med_pitch) < 0.1]
                 x_dist = self.get_dist_traveled(yo_df)
                 # create Nx1 subplots
                 fig, axes = plt.subplots(len(par_list), 1, sharex=True, squeeze=False)
                 for i, p in enumerate(par_list):
                     ax = axes[i][0]
+                    if not ((min_val[i] == -np.inf) or (max_val[i] == np.inf)):
+                        ax.set(ylim=(min_val[i], max_val[i]))
                     if p in [self.press_par, self.depth_par]:
                         ax.invert_yaxis()
                     ax.plot(x_dist, yo_df[p])
